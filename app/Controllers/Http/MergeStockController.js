@@ -20,67 +20,50 @@ class MergeStockController {
         try {
             await fs.remove(`${Helpers.tmpPath('uploads')}`)
         } catch (e) {
-            //
+            console.log("wasn't able to remove folder", e);
         }
         const originalStock = request.file('originalStock')
         const updatedStock = request.file('updatedStock')
         await originalStock.move(Helpers.tmpPath('uploads'))
         await updatedStock.move(Helpers.tmpPath('uploads'))
+        const ogJson = await toJSON(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName);
+        const upJson = await toJSON(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName);
 
-
-
-
-
-
-       const ogJson = await toJSON(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName);
-       const upJson = await toJSON(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName);
-       
-
-            const updatedFile = ogJson.map(product => {
-            const sku = product['meta:purchase_sku'] || product['meta:skuId'];
-            if (!sku) {
-                return product
-            }
-            if(product.sku == 'A3883') {
-                console.log(product);
-            }
-            if( product['meta:skuId']) {
-                product['meta:purchase_sku'] =  product['meta:skuId']
-                product['meta:skuId'] = '';
-            }
-
-
-            const matchedSku = upJson.filter(product => {    
-                            
-                if(product.skuId){
-                    return product.skuId === sku
+        const updatedStockBySku = upJson.reduce((obj, product) => {
+            const sku = product.skuId || product['sku Id'] || product['Sku Id'];
+            if(sku) {
+                if(obj[sku]) {
+                    console.log('woah sku overlapped up: ', sku);
                 }
-                if(product["sku Id"]) {
-                    return product["sku Id"] === sku
-                }
-
-                return false
-            })
-
-            if(matchedSku.length === 0) {
-                return product;
+                obj[sku] = product;
             }
-            // console.log(product, sku, matchedSku)
-            const match = matchedSku[0]
+            return obj;
+        }, {});
 
-            const stock = match.QuantityInStock || match["Quantity In Stock"]
-
-            product.stock = stock
-            product["manage_stock"] = 'yes'
-
-            stock == 0 ? product["stock_status"] = "outofstock" : product["stock_status"] = "instock"
-
+        const updatedFile = ogJson.map(product => {
+            const sku = product['meta:purchase_sku'];
+            if(sku) {
+                const updatedProduct = updatedStockBySku[sku];
+                if(updatedProduct) {
+                    const updatedPrice = updatedProduct['MSRP'].replace('$', '');
+                    const minPrice = updatedProduct['Min Advertised Price'].replace('$', '');
+                    const buyingPrice = updatedProduct['Price'].replace('$', '');
+                    const stock = updatedProduct.QuantityInStock || updatedProduct["Quantity In Stock"];
+                    
+                    product['regular_price'] = updatedPrice;
+                    product['sale_price'] = minPrice;
+                    product['meta:buying_price'] = buyingPrice;
+                    product['stock'] = stock;
+                    product['manage_stock'] = 'yes';
+                    stock == 0 ? product["stock_status"] = "outofstock" : product["stock_status"] = "instock"
+                }
+            }
             return product;
+        });
 
-        })
 
-        // console.log(updatedFile, {})
-        var csv = json2csv({ data: updatedFile});
+
+        const csv = await json2csv({ data: updatedFile});
         
         fs.writeFile(`${Helpers.tmpPath('uploads')}/update.csv`, csv, function(err) {
           if (err) throw err;
@@ -89,11 +72,11 @@ class MergeStockController {
 
         await removeFile(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName)
         await removeFile(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName)
+        
         response.attachment(
             `${Helpers.tmpPath('uploads')}/update.csv`
         )
-
-     }
+    }
 }
 
 module.exports = MergeStockController

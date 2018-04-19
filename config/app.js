@@ -13,7 +13,16 @@ module.exports = {
   |
   */
   appKey: Env.get('APP_KEY'),
-
+  logger: {
+    transport: 'console',
+    console: {
+      driver: 'console'
+    },
+    file: {
+      driver: 'file',
+      filename: 'adonis.log'
+    }
+  },
   http: {
     /*
     |--------------------------------------------------------------------------
