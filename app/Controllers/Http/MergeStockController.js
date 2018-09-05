@@ -20,80 +20,69 @@ class MergeStockController {
         try {
             await fs.remove(`${Helpers.tmpPath('uploads')}`)
         } catch (e) {
-            //
+            console.log("wasn't able to remove folder", e);
         }
         const originalStock = request.file('originalStock')
         const updatedStock = request.file('updatedStock')
         await originalStock.move(Helpers.tmpPath('uploads'))
         await updatedStock.move(Helpers.tmpPath('uploads'))
+        const ogJson = await toJSON(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName);
+        const upJson = await toJSON(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName);
 
-
-
-
-
-
-       const ogJson = await toJSON(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName);
-       const upJson = await toJSON(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName);
-       
-
-            const updatedFile = ogJson.map(product => {
-            const sku = product['meta:purchase_sku'] || product['meta:skuId'];
-            if (!sku) {
-                return product
-            }
-            if(product.sku == 'A3883') {
-                console.log(product);
-            }
-            if( product['meta:skuId']) {
-                product['meta:purchase_sku'] =  product['meta:skuId']
-                product['meta:skuId'] = '';
-            }
-
-
-            const matchedSku = upJson.filter(product => {    
-                            
-                if(product.skuId){
-                    return product.skuId === sku
+        const updatedStockBySku = upJson.reduce((obj, product) => {
+            const sku = product.skuId || product['sku Id'] || product['Sku Id'];
+            
+            if(sku) {
+                if(obj[sku]) {
+                    console.log('woah sku overlapped up: ', sku);
                 }
-                if(product["sku Id"]) {
-                    return product["sku Id"] === sku
-                }
-
-                return false
-            })
-
-            if(matchedSku.length === 0) {
-                return product;
+                obj[sku] = product;
             }
-            // console.log(product, sku, matchedSku)
-            const match = matchedSku[0]
+            return obj;
+        }, {});
 
-            const stock = match.QuantityInStock || match["Quantity In Stock"]
+        const updatedFile = ogJson.map(product => {
+            const sku = product['meta:purchase_sku'];
+            if(sku) {
+                const updatedProduct = updatedStockBySku[sku];
+                if(updatedProduct) {
+                    const msrp = updatedProduct['MSRP'] || updatedProduct['msrp'] || '0.00';
+                    const min = updatedProduct['Min Advertised Price'] || updatedProduct['minAdvertisedPrice'];
+                    const price = updatedProduct['Price'] || updatedProduct['price'];
+                    const qty = updatedProduct.QuantityInStock || updatedProduct["Quantity In Stock"];
 
-            product.stock = stock
-            product["manage_stock"] = 'yes'
-
-            stock == 0 ? product["stock_status"] = "outofstock" : product["stock_status"] = "instock"
-
+                    const updatedPrice = msrp.replace('$', '');
+                    const minPrice = min.replace('$', '');
+                    const buyingPrice = price.replace('$', '');
+                    const stock = qty;
+                    
+                    // if(updatedPrice !== product['regular_price'] || minPrice !== product['sale_price'] || buyingPrice !== product["meta:buying_price"] || stock !== product['stock']) {
+                        return {
+                            sku: product.sku,
+                            regular_price: updatedPrice,
+                            sale_price: minPrice,
+                            "meta:buying_price": buyingPrice,
+                            "stock": stock,
+                            "manage_stock": 'yes',
+                            "stock_status": stock == 0 ? "outofstock" : "instock",
+                            "in_store_only": !!product['in_store_only']
+                        }
+                    // }
+                }
+            }
             return product;
+        }).filter(item => !!item);
 
-        })
 
-        // console.log(updatedFile, {})
-        var csv = json2csv({ data: updatedFile});
-        
-        fs.writeFile(`${Helpers.tmpPath('uploads')}/update.csv`, csv, function(err) {
-          if (err) throw err;
-          console.log('file saved');
-        });
+        const downloadFile = `${Helpers.tmpPath('uploads')}/update.csv`;
 
+        const csv = await json2csv({ data: updatedFile});
+        await fs.outputFile(downloadFile, csv);
         await removeFile(Helpers.tmpPath('uploads') + '/' + originalStock.toJSON().fileName)
         await removeFile(Helpers.tmpPath('uploads') + '/' + updatedStock.toJSON().fileName)
-        response.attachment(
-            `${Helpers.tmpPath('uploads')}/update.csv`
-        )
 
-     }
+        response.attachment(`${Helpers.tmpPath('uploads')}/update.csv`);
+    }
 }
 
 module.exports = MergeStockController
