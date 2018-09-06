@@ -41,7 +41,7 @@ class MergeStockController {
             return obj;
         }, {});
 
-        const updatedFile = ogJson.map(product => {
+        const updatedFile = ogJson.reduce((products, product) => {
             const sku = product['meta:purchase_sku'];
             if(sku) {
                 const updatedProduct = updatedStockBySku[sku];
@@ -57,7 +57,7 @@ class MergeStockController {
                     const stock = qty;
                     
                     // if(updatedPrice !== product['regular_price'] || minPrice !== product['sale_price'] || buyingPrice !== product["meta:buying_price"] || stock !== product['stock']) {
-                        return {
+                        return [...products, {
                             sku: product.sku,
                             regular_price: updatedPrice,
                             sale_price: minPrice,
@@ -66,12 +66,13 @@ class MergeStockController {
                             "manage_stock": 'yes',
                             "stock_status": stock == 0 ? "outofstock" : "instock",
                             "in_store_only": !!product['in_store_only']
-                        }
+                        }];
                     // }
                 }
-            }
-            return product;
-        }).filter(item => !!item);
+            }  
+        
+            return products;
+        }, []).filter(item => !!item);
 
 
         const downloadFile = `${Helpers.tmpPath('uploads')}/update.csv`;
